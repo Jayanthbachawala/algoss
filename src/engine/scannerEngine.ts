@@ -40,7 +40,6 @@ export interface ScannerOptions {
 }
 
 const DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"];
-const DEFAULT_PROXY_BASE_URL = "http://localhost:4002";
 const scannerState = new Map<string, { previousPrice: number; volumeAverage: number; highs: number[]; lows: number[] }>();
 let foSymbolCache: { symbols: string[]; fetchedAt: number } | null = null;
 
@@ -55,7 +54,7 @@ const withTimeout = async <T>(fn: Promise<T>, ms: number): Promise<T> => {
   return Promise.race([fn, timeout]);
 };
 
-const getProxyBaseUrl = (proxyBaseUrl?: string): string => proxyBaseUrl?.trim() || DEFAULT_PROXY_BASE_URL;
+const getProxyBaseUrl = (proxyBaseUrl?: string): string => proxyBaseUrl?.trim() || "";
 
 const getChainObject = (optionChainData: JsonRecord): JsonRecord => {
   const data = toRecord(optionChainData.data);
