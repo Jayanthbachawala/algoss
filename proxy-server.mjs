@@ -112,6 +112,28 @@ async function dhanFetch(path, body, method = "POST", customClientId, customAcce
   return res.json();
 }
 
+
+async function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("end", () => {
+      if (!raw) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(new Error("Invalid JSON body"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
 async function handleDhanProxy(params, userClientId, userAccessToken) {
   const endpoint = params.get("endpoint");
   const symbol = (params.get("symbol") || "NIFTY").toUpperCase();
@@ -798,7 +820,14 @@ const server = http.createServer(async (req, res) => {
   Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
 
   try {
-    if (url.pathname === "/api/dhan-proxy") {
+    if (url.pathname === "/api/dhan-order" && req.method === "POST") {
+      const userClientId = req.headers["x-dhan-client-id"];
+      const userAccessToken = req.headers["x-dhan-access-token"];
+      const orderBody = await readJsonBody(req);
+      const data = await dhanFetch("/orders", orderBody, "POST", userClientId, userAccessToken);
+      res.writeHead(200);
+      res.end(JSON.stringify(data));
+    } else if (url.pathname === "/api/dhan-proxy") {
       const userClientId = req.headers["x-dhan-client-id"];
       const userAccessToken = req.headers["x-dhan-access-token"];
       const { data, cacheHit } = await handleDhanProxy(params, userClientId, userAccessToken);
@@ -848,7 +877,7 @@ const server = http.createServer(async (req, res) => {
       }));
     } else {
       res.writeHead(404);
-      res.end(JSON.stringify({ error: "Not found. Use /api/dhan-proxy, /api/nse-proxy, /api/tv-scan, or /ws" }));
+      res.end(JSON.stringify({ error: "Not found. Use /api/dhan-proxy, /api/dhan-order, /api/nse-proxy, /api/tv-scan, or /ws" }));
     }
   } catch (err) {
     console.error(`[Proxy Error] ${url.pathname}:`, err.message);
