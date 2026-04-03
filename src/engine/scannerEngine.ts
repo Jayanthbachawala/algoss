@@ -4,6 +4,7 @@ import type { Signal, SignalResult } from "./strategies";
 import type { SignalInputs } from "./indicators";
 import type { MarketRegime } from "./regimeEngine";
 import { DEFAULT_COOLDOWN_MS, tradeCooldown } from "./tradeCooldown";
+import { getBucketPerformance } from "./learningEngine";
 
 type JsonRecord = Record<string, unknown>;
 interface ChainEntry { strike: number; ce: JsonRecord; pe: JsonRecord }
@@ -11,12 +12,20 @@ interface ChainEntry { strike: number; ce: JsonRecord; pe: JsonRecord }
 type DirectionalSignal = Exclude<Signal, "NO_TRADE">;
 type StrikeBucket = "ATM" | "ITM" | "OTM";
 
+interface RankedScannerResult extends ScannerResult {
+  riskReward: number;
+  volatility: number;
+  rankingScore: number;
+}
+
 export interface ScannerResult {
   symbol: string;
   signal: DirectionalSignal;
   strike: number;
   confidence: number;
   regime: Exclude<MarketRegime, "SIDEWAYS">;
+  historicalWinRate: number | null;
+  confidenceTag: "NORMAL" | "HIGH_CONFIDENCE";
 }
 
 export interface ScannerOptions {
@@ -30,8 +39,9 @@ export interface ScannerOptions {
   cooldownMs?: number;
 }
 
-const DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "INFY", "TCS", "LT", "AXISBANK", "BAJFINANCE"];
+const DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"];
 const scannerState = new Map<string, { previousPrice: number; volumeAverage: number; highs: number[]; lows: number[] }>();
+let foSymbolCache: { symbols: string[]; fetchedAt: number } | null = null;
 
 const toRecord = (value: unknown): JsonRecord => (value && typeof value === "object" ? (value as JsonRecord) : {});
 const toNumber = (value: unknown, fallback = 0): number => {
@@ -178,10 +188,23 @@ const fetchOptionChain = async (symbol: string, options: ScannerOptions): Promis
   return (await response.json()) as JsonRecord;
 };
 
-const scanOneSymbol = async (symbol: string, options: ScannerOptions): Promise<ScannerResult | null> => {
+const scanOneSymbol = async (symbol: string, options: ScannerOptions): Promise<RankedScannerResult | null> => {
   const optionChain = await fetchOptionChain(symbol, options);
   const inputs = buildSignalInputs(symbol, optionChain);
   const regime = detectMarketRegime(inputs);
+  const bucketPerformance = getBucketPerformance(
+    {
+      pcr: inputs.pcr,
+      volumeSpike: inputs.volume > inputs.volumeMovingAverage,
+      regime: regime.regime,
+    },
+    20,
+  );
+  const historicalWinRate = bucketPerformance ? bucketPerformance.winRate * 100 : null;
+
+  if (historicalWinRate !== null && historicalWinRate < 50) return null;
+  if (historicalWinRate !== null && historicalWinRate <= 60) return null;
+
   const signal: SignalResult = generateSignal(inputs);
 
   if (signal.signal === "NO_TRADE") return null;
@@ -192,6 +215,9 @@ const scanOneSymbol = async (symbol: string, options: ScannerOptions): Promise<S
   if (tradeCooldown.isCooldownActive(symbol, cooldownMs)) return null;
 
   const bestStrike = selectBestStrike(getEntries(optionChain), signal.signal, inputs.price);
+  const { riskReward, volatility } = buildRankingMetrics(signal.signal, inputs);
+  const rankingScore = calculateRankingScore({ confidence: signal.confidence, riskReward, volatility });
+
   tradeCooldown.markTrade(symbol);
 
   return {
@@ -200,17 +226,81 @@ const scanOneSymbol = async (symbol: string, options: ScannerOptions): Promise<S
     strike: bestStrike,
     confidence: signal.confidence,
     regime: regime.regime,
+    historicalWinRate: historicalWinRate !== null ? Number(historicalWinRate.toFixed(2)) : null,
+    confidenceTag: historicalWinRate !== null && historicalWinRate > 70 ? "HIGH_CONFIDENCE" : "NORMAL",
+    riskReward,
+    volatility,
+    rankingScore,
   };
 };
 
+
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+const buildRankingMetrics = (signal: DirectionalSignal, inputs: SignalInputs): { riskReward: number; volatility: number } => {
+  const upside = Math.max(inputs.callResistance - inputs.price, 1);
+  const downside = Math.max(inputs.price - inputs.putSupport, 1);
+
+  const riskReward = signal === "BUY_CE" ? upside / downside : downside / upside;
+  const volatility = inputs.iv + (inputs.atr / Math.max(inputs.price, 1)) * 100;
+
+  return {
+    riskReward: Number(riskReward.toFixed(3)),
+    volatility: Number(volatility.toFixed(3)),
+  };
+};
+
+const calculateRankingScore = (candidate: { confidence: number; riskReward: number; volatility: number }): number => {
+  const confidenceScore = clamp01(candidate.confidence / 100);
+  const riskRewardScore = clamp01(candidate.riskReward / 3);
+  const volatilityScore = 1 - clamp01(candidate.volatility / 100);
+
+  return Number((confidenceScore * 0.5 + riskRewardScore * 0.35 + volatilityScore * 0.15).toFixed(6));
+};
+
+const fetchFoSymbols = async (options: ScannerOptions): Promise<string[]> => {
+  const now = Date.now();
+  if (foSymbolCache && now - foSymbolCache.fetchedAt < 10 * 60 * 1000) {
+    return foSymbolCache.symbols;
+  }
+
+  const proxyBaseUrl = options.proxyBaseUrl || "";
+  const endpoint = `${proxyBaseUrl}/api/dhan-proxy?endpoint=instruments`;
+  const response = await withTimeout(fetch(endpoint, { headers: options.requestHeaders }), options.timeoutMs ?? 15000);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch F&O symbol universe: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as JsonRecord;
+  const data = toRecord(payload.data);
+  const instruments = Array.isArray(data.instruments) ? data.instruments : [];
+
+  const symbols = Array.from(
+    new Set(
+      instruments
+        .map((item) => toRecord(item))
+        .filter((item) => item.exchangeSegment === "NSE_FNO" && (item.optionType === "CE" || item.optionType === "PE"))
+        .map((item) => String(item.symbol || "").trim())
+        .filter((symbol) => symbol.length > 0),
+    ),
+  );
+
+  const merged = Array.from(new Set([...DEFAULT_SYMBOLS, ...symbols]));
+  foSymbolCache = { symbols: merged, fetchedAt: now };
+  return merged;
+};
+
 export const runOptionsScanner = async (options: ScannerOptions = {}): Promise<ScannerResult[]> => {
-  const symbols = options.symbols?.length ? options.symbols : DEFAULT_SYMBOLS;
+  const symbols = options.symbols?.length ? options.symbols : await fetchFoSymbols(options);
   const results = await Promise.allSettled(symbols.map((symbol) => scanOneSymbol(symbol, options)));
 
   return results
     .flatMap((result) => (result.status === "fulfilled" && result.value ? [result.value] : []))
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, options.maxResults ?? 5);
+    .sort((a, b) => b.rankingScore - a.rankingScore)
+    .slice(0, 3)
+    .map(({ riskReward, volatility, rankingScore, ...rest }) => rest);
 };
 
 export const startOptionsScanner = (

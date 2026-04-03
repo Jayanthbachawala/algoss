@@ -97,11 +97,37 @@ export const TradingSignalBadge = ({
       return;
     }
 
+    const regimeFromReason = signalResult.reason.find((entry) => entry.startsWith("Regime:"))?.split(":")[1]?.trim().split(" ")[0] || "UNKNOWN";
+    const volumeSpike = (liveData.volume ?? 0) > (liveData.volumeMovingAverage ?? Number.MAX_SAFE_INTEGER);
+
     paperTradeService.openTrade({
       ...signalPayload,
       capital: paperTradeCapital,
+      signalConditions: signalResult.reason,
+      marketFeatures: {
+        oiChange: liveData.oiChange,
+        pcr: liveData.pcr,
+        volume: liveData.volume ?? 0,
+        vwapDiff: liveData.price - (liveData.vwap ?? liveData.price),
+        regime: regimeFromReason,
+        volumeSpike,
+        factorAlignment: signalResult.factorAlignment,
+        strategyId: signalResult.strategyId,
+      },
     });
-  }, [paperTradeCapital, signalPayload]);
+  }, [
+    liveData.oiChange,
+    liveData.pcr,
+    liveData.price,
+    liveData.volume,
+    liveData.volumeMovingAverage,
+    liveData.vwap,
+    paperTradeCapital,
+    signalPayload,
+    signalResult.factorAlignment,
+    signalResult.reason,
+    signalResult.strategyId,
+  ]);
 
   return (
     <div className={`rounded-md border p-3 ${className}`.trim()}>

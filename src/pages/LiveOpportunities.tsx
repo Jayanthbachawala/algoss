@@ -63,6 +63,8 @@ export const LiveOpportunitiesPage = () => {
               <th className="py-2">Signal</th>
               <th className="py-2">Strike</th>
               <th className="py-2">Confidence</th>
+              <th className="py-2">Learning Win Rate</th>
+              <th className="py-2">Confidence Tag</th>
               <th className="py-2">Regime</th>
             </tr>
           </thead>
@@ -77,6 +79,16 @@ export const LiveOpportunitiesPage = () => {
                 </td>
                 <td className="py-2">{item.strike}</td>
                 <td className="py-2">{item.confidence}%</td>
+                <td className="py-2">{item.historicalWinRate !== null ? `${item.historicalWinRate}%` : "N/A"}</td>
+                <td className="py-2">
+                  {item.confidenceTag === "HIGH_CONFIDENCE" ? (
+                    <span className="rounded border border-amber-300 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                      HIGH CONFIDENCE
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">NORMAL</span>
+                  )}
+                </td>
                 <td className="py-2">{item.regime}</td>
               </tr>
             ))}

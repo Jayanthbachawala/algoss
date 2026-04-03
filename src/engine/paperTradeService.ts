@@ -1,6 +1,7 @@
 import { aiDataStore } from "./aiDataStore";
 import { DEFAULT_COOLDOWN_MS, tradeCooldown } from "./tradeCooldown";
 import { createRiskPlan, type RiskPlan } from "./riskEngine";
+import { updateLearningBuckets } from "./learningEngine";
 import type { Signal } from "./strategies";
 
 export interface PaperTradeInput {
@@ -11,6 +12,22 @@ export interface PaperTradeInput {
   optionType: "CE" | "PE";
   capital: number;
   cooldownMs?: number;
+  signalConditions?: string[];
+  marketFeatures?: {
+    oiChange: number;
+    pcr: number;
+    volume: number;
+    vwapDiff: number;
+    regime: string;
+    volumeSpike?: boolean;
+    factorAlignment?: {
+      oiAlignment: boolean;
+      pcrCondition: boolean;
+      volumeSpike: boolean;
+      vwapAlignment: boolean;
+    };
+    strategyId?: string;
+  };
 }
 
 export interface PaperTrade {
@@ -24,6 +41,22 @@ export interface PaperTrade {
   stopLossPrice: number;
   targetPrice: number;
   riskPlan: RiskPlan;
+  signalConditions: string[];
+  marketFeatures: {
+    oiChange: number;
+    pcr: number;
+    volume: number;
+    vwapDiff: number;
+    regime: string;
+    volumeSpike?: boolean;
+    factorAlignment?: {
+      oiAlignment: boolean;
+      pcrCondition: boolean;
+      volumeSpike: boolean;
+      vwapAlignment: boolean;
+    };
+    strategyId?: string;
+  };
   status: "OPEN" | "CLOSED";
 }
 
@@ -31,6 +64,7 @@ export interface ClosedPaperTrade extends PaperTrade {
   status: "CLOSED";
   exitPrice: number;
   pnl: number;
+  outcome: "WIN" | "LOSS";
   closedAt: number;
 }
 
@@ -67,15 +101,19 @@ class PaperTradeService {
       return null;
     }
 
+    const pnl = Number(((exitPrice - this.activeTrade.entryPrice) * this.activeTrade.quantity).toFixed(2));
+
     const closedTrade: ClosedPaperTrade = {
       ...this.activeTrade,
       status: "CLOSED",
       exitPrice,
-      pnl: Number(((exitPrice - this.activeTrade.entryPrice) * this.activeTrade.quantity).toFixed(2)),
+      pnl,
+      outcome: pnl >= 0 ? "WIN" : "LOSS",
       closedAt: Date.now(),
     };
 
     this.tradeHistory.push(closedTrade);
+
     aiDataStore.recordTrade({
       id: closedTrade.id,
       symbol: closedTrade.symbol,
@@ -85,6 +123,44 @@ class PaperTradeService {
       quantity: closedTrade.quantity,
       pnl: closedTrade.pnl,
     });
+
+    aiDataStore.recordTradeOutcome({
+      features: {
+        symbol: closedTrade.symbol,
+        strike: closedTrade.strike,
+        optionType: closedTrade.optionType,
+        entryPrice: closedTrade.entryPrice,
+        exitPrice: closedTrade.exitPrice,
+        quantity: closedTrade.quantity,
+        stopLossPrice: closedTrade.stopLossPrice,
+        targetPrice: closedTrade.targetPrice,
+        riskPerUnit: closedTrade.riskPlan.riskPerUnit,
+        maxRiskAmount: closedTrade.riskPlan.maxRiskAmount,
+        signalConditions: closedTrade.signalConditions.join(" | "),
+      },
+      signal: closedTrade.signal,
+      outcome: closedTrade.outcome,
+      pnl: closedTrade.pnl,
+    });
+
+    aiDataStore.saveTrade({
+      timestamp: new Date(closedTrade.closedAt).toISOString(),
+      symbol: closedTrade.symbol,
+      signal: closedTrade.signal,
+      features: {
+        ...closedTrade.marketFeatures,
+        volumeSpike:
+          closedTrade.marketFeatures.volumeSpike ??
+          closedTrade.signalConditions.some((condition) => condition.toLowerCase().includes("volume spike")),
+        factorAlignment: closedTrade.marketFeatures.factorAlignment,
+        strategyId: closedTrade.marketFeatures.strategyId,
+      },
+      outcome: closedTrade.outcome,
+      pnl: closedTrade.pnl,
+    });
+
+    updateLearningBuckets();
+
     this.activeTrade = null;
     this.notify();
 
@@ -126,6 +202,22 @@ class PaperTradeService {
       stopLossPrice: riskPlan.stopLossPrice,
       targetPrice: riskPlan.targetPrice,
       riskPlan,
+      signalConditions: input.signalConditions || [],
+      marketFeatures: input.marketFeatures || {
+        oiChange: 0,
+        pcr: 1,
+        volume: 0,
+        vwapDiff: 0,
+        regime: "UNKNOWN",
+        volumeSpike: false,
+        factorAlignment: {
+          oiAlignment: false,
+          pcrCondition: false,
+          volumeSpike: false,
+          vwapAlignment: false,
+        },
+        strategyId: "UNKNOWN",
+      },
       status: "OPEN",
     };
 

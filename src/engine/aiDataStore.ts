@@ -46,6 +46,8 @@ class AIDataStore {
         signals: parsed.signals || [],
         features: parsed.features || [],
         trades: parsed.trades || [],
+        tradeOutcomes: parsed.tradeOutcomes || [],
+        learningTrades: parsed.learningTrades || [],
       };
     } catch (error) {
       console.warn("Failed to parse AI dataset cache", error);
@@ -76,16 +78,46 @@ class AIDataStore {
     this.persist();
   }
 
+  recordTradeOutcome(sample: Omit<TradeLearningSample, "timestamp">): void {
+    this.dataset.tradeOutcomes.push({
+      ...sample,
+      timestamp: Date.now(),
+    });
+    this.persist();
+  }
+
+  saveTrade(trade: LearningTradeRecord): void {
+    this.dataset.learningTrades.push(trade);
+    this.persist();
+  }
+
+  getAllTrades(): LearningTradeRecord[] {
+    return [...this.dataset.learningTrades];
+  }
+
+  getTradesByCondition(filter: TradeFilter): LearningTradeRecord[] {
+    return this.dataset.learningTrades.filter((trade) => {
+      if (filter.symbol && trade.symbol !== filter.symbol) return false;
+      if (filter.signal && trade.signal !== filter.signal) return false;
+      if (filter.outcome && trade.outcome !== filter.outcome) return false;
+      if (typeof filter.minPnl === "number" && trade.pnl < filter.minPnl) return false;
+      if (typeof filter.maxPnl === "number" && trade.pnl > filter.maxPnl) return false;
+      return true;
+    });
+  }
+
   getDataset(): SignalDataset {
     return {
       signals: [...this.dataset.signals],
       features: [...this.dataset.features],
       trades: [...this.dataset.trades],
+      tradeOutcomes: [...this.dataset.tradeOutcomes],
+      learningTrades: [...this.dataset.learningTrades],
     };
   }
 
   clear(): void {
-    this.dataset = { signals: [], features: [], trades: [] };
+    this.dataset = { signals: [], features: [], trades: [], tradeOutcomes: [], learningTrades: [] };
     this.persist();
   }
 }
