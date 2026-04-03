@@ -40,6 +40,7 @@ export interface ScannerOptions {
 }
 
 const DEFAULT_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"];
+const DEFAULT_PROXY_BASE_URL = "http://localhost:4002";
 const scannerState = new Map<string, { previousPrice: number; volumeAverage: number; highs: number[]; lows: number[] }>();
 let foSymbolCache: { symbols: string[]; fetchedAt: number } | null = null;
 
@@ -53,6 +54,8 @@ const withTimeout = async <T>(fn: Promise<T>, ms: number): Promise<T> => {
   const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Scanner request timed out after ${ms}ms`)), ms));
   return Promise.race([fn, timeout]);
 };
+
+const getProxyBaseUrl = (proxyBaseUrl?: string): string => proxyBaseUrl?.trim() || DEFAULT_PROXY_BASE_URL;
 
 const getChainObject = (optionChainData: JsonRecord): JsonRecord => {
   const data = toRecord(optionChainData.data);
@@ -181,11 +184,17 @@ const selectBestStrike = (entries: ChainEntry[], signal: DirectionalSignal, spot
 };
 
 const fetchOptionChain = async (symbol: string, options: ScannerOptions): Promise<JsonRecord> => {
-  const proxyBaseUrl = options.proxyBaseUrl || "";
+  const proxyBaseUrl = getProxyBaseUrl(options.proxyBaseUrl);
   const endpoint = `${proxyBaseUrl}/api/dhan-proxy?endpoint=option-chain&symbol=${encodeURIComponent(symbol)}`;
   const response = await withTimeout(fetch(endpoint, { headers: options.requestHeaders }), options.timeoutMs ?? 12000);
   if (!response.ok) throw new Error(`Failed to fetch option chain for ${symbol}: ${response.status}`);
-  return (await response.json()) as JsonRecord;
+
+  try {
+    const payload = (await response.json()) as unknown;
+    return toRecord(payload);
+  } catch {
+    throw new Error(`Invalid JSON received for option chain ${symbol}`);
+  }
 };
 
 const scanOneSymbol = async (symbol: string, options: ScannerOptions): Promise<RankedScannerResult | null> => {
@@ -265,7 +274,7 @@ const fetchFoSymbols = async (options: ScannerOptions): Promise<string[]> => {
     return foSymbolCache.symbols;
   }
 
-  const proxyBaseUrl = options.proxyBaseUrl || "";
+  const proxyBaseUrl = getProxyBaseUrl(options.proxyBaseUrl);
   const endpoint = `${proxyBaseUrl}/api/dhan-proxy?endpoint=instruments`;
   const response = await withTimeout(fetch(endpoint, { headers: options.requestHeaders }), options.timeoutMs ?? 15000);
 
@@ -273,7 +282,12 @@ const fetchFoSymbols = async (options: ScannerOptions): Promise<string[]> => {
     throw new Error(`Failed to fetch F&O symbol universe: ${response.status}`);
   }
 
-  const payload = (await response.json()) as JsonRecord;
+  let payload: JsonRecord;
+  try {
+    payload = toRecord((await response.json()) as unknown);
+  } catch {
+    throw new Error("Invalid JSON received for F&O symbol universe");
+  }
   const data = toRecord(payload.data);
   const instruments = Array.isArray(data.instruments) ? data.instruments : [];
 

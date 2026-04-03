@@ -40,6 +40,8 @@ export interface AutoTradeOptions {
 }
 
 class AutoTradeService {
+  private readonly defaultProxyBaseUrl = "http://localhost:4002";
+
   private activeTrade: ActiveTrade | null = null;
 
   private readonly lastSignalByKey = new Map<string, Signal>();
@@ -81,7 +83,7 @@ class AutoTradeService {
       signal: input.signal,
     });
 
-    const endpoint = `${config.proxyBaseUrl || ""}/api/dhan-order`;
+    const endpoint = `${config.proxyBaseUrl?.trim() || this.defaultProxyBaseUrl}/api/dhan-order`;
 
     const orderPayload = {
       dhanClientId: config.dhanClientId,
@@ -116,7 +118,12 @@ class AutoTradeService {
         throw new Error(`Order failed (${response.status}): ${errorText}`);
       }
 
-      const orderResult = await response.json();
+      let orderResult: unknown;
+      try {
+        orderResult = await response.json();
+      } catch {
+        throw new Error("Order API returned non-JSON response");
+      }
       this.activeTrade = {
         signal: input.signal,
         symbol: input.symbol,
