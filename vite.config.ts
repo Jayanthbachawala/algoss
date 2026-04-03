@@ -7,6 +7,12 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "0.0.0.0",
     port: 4001,
+    proxy: {
+      "/api": {
+        target: "http://localhost:4002",
+        changeOrigin: true,
+      },
+    },
     hmr: {
       overlay: false,
     },
@@ -19,4 +25,3 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
   },
 }));
-
