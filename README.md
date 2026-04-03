@@ -34,6 +34,60 @@ Market Data → Signal Engine → Regime Engine → Risk Engine → Scanner → 
 
 ---
 
+## Signal Logic Overview
+
+This section summarizes how a trade signal is evaluated from raw market inputs.
+
+### 1) OI + Price Classification
+- The engine first classifies combined **Open Interest (OI)** and **price action** into directional states.
+- Typical states include long buildup, short buildup, short covering, and long unwinding.
+- This gives the initial directional context (bullish vs bearish pressure).
+
+### 2) PCR Usage
+- **Put-Call Ratio (PCR)** is used as a directional confirmation layer.
+- A bullish/bearish PCR bias must align with the candidate signal to increase confidence.
+
+### 3) Volume Confirmation
+- The engine checks for a **volume spike** versus the moving average.
+- Signals with participation confirmation are treated as stronger than low-participation moves.
+
+### 4) VWAP Filter
+- Price is validated against **VWAP**:
+  - For bullish setups, price should be above VWAP.
+  - For bearish setups, price should be below VWAP.
+- This helps reject directionally weak setups.
+
+### 5) Market Regime Filter
+- A regime layer classifies market state (for example, trending up, trending down, sideways).
+- Sideways/low-quality regimes are filtered out to reduce unnecessary trades.
+
+### 6) Confidence Scoring
+- A weighted score is built from aligned factors (OI+Price, PCR, Volume, VWAP, etc.).
+- Confidence is then adjusted by historical learning stats where available.
+- Final trade/no-trade decision is based on confidence thresholds and strategy gates.
+
+---
+
+## Scanner Engine
+
+The scanner continuously evaluates multiple symbols and surfaces only high-quality trade candidates.
+
+### What it does
+- Scans multiple symbols in one run (or on interval).
+- Builds signal inputs per symbol from market/option-chain data.
+- Applies filtering and ranking before returning opportunities.
+
+### Filters applied
+- **Confidence filter**: keeps only signals above the configured confidence threshold.
+- **Regime filter**: excludes low-quality/sideways regime setups.
+- **Cooldown filter**: blocks symbols in active cooldown to avoid overtrading.
+
+### Output
+- Returns the **top opportunities** after filtering and ranking.
+- Output includes core fields such as symbol, signal direction, strike, confidence, and regime context.
+
+---
+
 ## Features
 
 - Real-time signal generation
@@ -138,3 +192,16 @@ npm run dev
 - **Not financial advice.**
 - This software is provided for **educational and research purposes** only.
 - Trading in options involves substantial risk. Use proper risk controls and validate strategies before any live deployment.
+
+## Limitations
+
+- Depends on market data quality.
+- No guarantee of profit.
+- Not a replacement for professional advice.
+
+## Roadmap
+
+- AI-based signal prediction
+- Advanced backtesting engine
+- Portfolio optimization
+- Multi-broker support

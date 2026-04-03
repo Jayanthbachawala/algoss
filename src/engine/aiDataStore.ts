@@ -14,14 +14,55 @@ export interface HistoricalTradeRecord {
   pnl: number;
 }
 
+export interface LearningTradeRecord {
+  timestamp: string;
+  symbol: string;
+  signal: Exclude<Signal, "NO_TRADE">;
+  features: {
+    oiChange: number;
+    pcr: number;
+    volume: number;
+    vwapDiff: number;
+    regime: string;
+    volumeSpike?: boolean;
+    factorAlignment?: {
+      oiAlignment: boolean;
+      pcrCondition: boolean;
+      volumeSpike: boolean;
+      vwapAlignment: boolean;
+    };
+    strategyId?: string;
+  };
+  outcome: "WIN" | "LOSS";
+  pnl: number;
+}
+
+export interface TradeLearningSample {
+  features: Record<string, number | string>;
+  signal: Exclude<Signal, "NO_TRADE">;
+  outcome: "WIN" | "LOSS";
+  pnl: number;
+  timestamp: number;
+}
+
 export interface HistoricalSignalRecord extends RawSignalSnapshot {
   id: string;
+}
+
+export interface TradeFilter {
+  symbol?: string;
+  signal?: Exclude<Signal, "NO_TRADE">;
+  outcome?: "WIN" | "LOSS";
+  minPnl?: number;
+  maxPnl?: number;
 }
 
 export interface SignalDataset {
   signals: HistoricalSignalRecord[];
   features: SignalFeatureVector[];
   trades: HistoricalTradeRecord[];
+  tradeOutcomes: TradeLearningSample[];
+  learningTrades: LearningTradeRecord[];
 }
 
 class AIDataStore {
@@ -29,6 +70,8 @@ class AIDataStore {
     signals: [],
     features: [],
     trades: [],
+    tradeOutcomes: [],
+    learningTrades: [],
   };
 
   constructor() {
