@@ -627,3 +627,44 @@ You are free to use, copy, modify, merge, publish, distribute, sublicense, and/o
 *Found a bug? Have an idea? [Open an issue](https://github.com/MrChartist/india-s-best-option-hub/issues) or submit a PR!*
 
 </div>
+
+---
+
+## 🧠 Quant Scanner & Signal Engine (Latest Additions)
+
+The codebase now includes a modular quant pipeline under `src/engine/`:
+
+- `signalEngine.ts` + `strategies.ts` + `indicators.ts` for confidence-scored signals
+- `regimeEngine.ts` for market regime detection (`TRENDING_UP`, `TRENDING_DOWN`, `SIDEWAYS`)
+- `scannerEngine.ts` for multi-symbol scanning and ranking top opportunities
+- `tradeCooldown.ts` to prevent overtrading on the same symbol within configurable cooldown windows
+- `riskEngine.ts` for position sizing and SL/target generation
+- `paperTradeService.ts` + `paperTradeAnalytics.ts` for simulation and performance tracking
+- `alertService.ts` and `autoTradeService.ts` for alerting and optional execution flow
+
+### Live Opportunities Page
+
+A dedicated page is available at `src/pages/LiveOpportunities.tsx` and is designed to:
+
+- auto-refresh every 60 seconds
+- scan multiple F&O symbols asynchronously
+- filter by confidence threshold (slider)
+- show only actionable opportunities sorted by confidence
+
+Displayed columns:
+
+- Symbol
+- Signal (BUY CE / BUY PE)
+- Strike
+- Confidence %
+- Regime
+
+### Strike Selection Logic
+
+Scanner strike selection is dynamic and evaluates ATM / ITM / OTM candidates. The selected strike is based on:
+
+- liquidity (volume)
+- OI concentration
+- bid-ask spread quality
+
+This helps avoid rigid fixed-strike behavior and improves opportunity quality.
